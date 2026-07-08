@@ -1,0 +1,57 @@
+version: '3.8'
+
+services:
+  n8n:
+    image: docker.n8n.io/n8nio/n8n
+    container_name: n8n
+    restart: unless-stopped
+    ports:
+      - "5678:5678"
+    environment:
+      - N8N_PORT=5678
+      - N8N_PROTOCOL=http
+      - WEBHOOK_URL=http://localhost:5678/
+      - DB_SQLITE_VACUUM_ON_STARTUP=true
+      - N8N_DIAGNOSTICS_ENABLED=false
+      - EXECUTIONS_DATA_PRUNE=true
+      - EXECUTIONS_DATA_MAX_AGE=30
+      - EXECUTIONS_DATA_PRUNE_MAX_COUNT=30
+    volumes:
+      - n8n_data:/home/node/.n8n
+    networks:
+      - app-network
+
+  docker-proxy:
+    image: alpine/socat
+    container_name: docker-proxy
+    restart: unless-stopped
+    command: tcp-listen:2375,fork,reuseaddr unix-connect:/var/run/docker.sock
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+    networks:
+      - app-network
+
+  web-app:
+    image: python:3.11-slim
+    container_name: web-app
+    restart: "no"
+    ports:
+      - "5000:5000"
+    working_dir: /app
+    environment:
+      - SERVER_NAME=web-app
+      - PORT=5000
+    volumes:
+      - ./test-app.py:/app/test-app.py:ro
+    command: >
+      sh -c "pip install flask && python test-app.py"
+    networks:
+      - app-network
+
+volumes:
+  n8n_data:
+    driver: local
+
+networks:
+  app-network:
+    driver: bridge
