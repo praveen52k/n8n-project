@@ -1,0 +1,170 @@
+{
+  "name": "AI Server Monitor",
+  "nodes": [
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "minutes",
+              "minutesInterval": 1
+            }
+          ]
+        }
+      },
+      "name": "Schedule Trigger",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.2,
+      "position": [0, 0]
+    },
+    {
+      "parameters": {
+        "url": "http://docker-proxy:2375/containers/web-app/json",
+        "options": {}
+      },
+      "name": "Check Server",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [220, 0]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "loose"
+          },
+          "conditions": [
+            {
+              "id": "condition1",
+              "leftValue": "={{ $json.State.Status }}",
+              "rightValue": "exited",
+              "operator": {
+                "type": "string",
+                "operation": "equals"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "name": "Is Down?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [440, 0]
+    },
+    {
+      "parameters": {
+        "url": "=http://docker-proxy:2375/containers/web-app/logs?stdout=true&stderr=true&tail=50",
+        "options": {
+          "response": {
+            "response": {
+              "responseFormat": "text"
+            }
+          }
+        }
+      },
+      "name": "Get Crash Logs",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [660, -100]
+    },
+    {
+      "parameters": {
+        "modelId": {
+          "__rl": true,
+          "value": "gpt-3.5-turbo",
+          "mode": "list",
+          "cachedResultName": "GPT-3.5-TURBO"
+        },
+        "messages": {
+          "values": [
+            {
+              "content": "=You are a senior DevOps engineer AI assistant. A Docker container has gone down. Analyze and write a complete incident report email.\n\nContainer Name: web-app\nContainer Exit Code: {{ $node[\"Is Down?\"].json.State.ExitCode }}\nContainer Status: {{ $node[\"Is Down?\"].json.State.Status }}\nOOM Killed: {{ $node[\"Is Down?\"].json.State.OOMKilled }}\nStopped At: {{ $node[\"Is Down?\"].json.State.FinishedAt }}\nStarted At: {{ $node[\"Is Down?\"].json.State.StartedAt }}\n\nDocker Exit Code Reference:\n- Exit code 0 = clean shutdown (normal stop)\n- Exit code 1 = application error or unhandled exception\n- Exit code 137 = SIGKILL (128+9). Container was forcefully killed. Could be: docker stop, docker kill, OOM killer, or system kill\n- Exit code 143 = SIGTERM (128+15). Container received graceful shutdown signal\n- Exit code 139 = SIGSEGV (128+11). Segmentation fault\n- Exit code 126 = permission error\n- Exit code 127 = command not found\n\nServer Logs (last 50 lines):\n{{ $json.data }}\n\nIMPORTANT: Use the exit code reference above to give a PRECISE root cause. Do NOT say unknown. Be specific.\nIf OOMKilled is false and exit code is 137, it means external kill (docker stop/kill or system intervention), NOT memory issue.\nIf exit code is 0, it means someone or something gracefully stopped the container.\n\nWrite a complete incident report email to the DevOps team with:\n- Subject line\n- What happened (be specific about the exit code meaning)\n- Root cause analysis (use exit code + logs to determine exact cause)\n- Severity level\n- Recommended actions\n\nWrite ONLY the email body. Do not add any extra commentary."
+            }
+          ]
+        },
+        "options": {}
+      },
+      "name": "AI Root Cause Analysis",
+      "type": "@n8n/n8n-nodes-langchain.openAi",
+      "typeVersion": 1.8,
+      "position": [880, -100]
+    },
+    {
+      "parameters": {
+        "fromEmail": "your-email@gmail.com",
+        "toEmail": "recipient@example.com",
+        "subject": "=ALERT: web-app container DOWN - Exit Code {{ $node[\"Is Down?\"].json.State.ExitCode }}",
+        "emailType": "text",
+        "message": "={{ $node[\"AI Root Cause Analysis\"].json.text || $node[\"AI Root Cause Analysis\"].json.message.content || $node[\"AI Root Cause Analysis\"].json.output || \"AI analysis not available - check OpenAI node configuration\" }}"
+      },
+      "name": "Send Alert",
+      "type": "n8n-nodes-base.emailSend",
+      "typeVersion": 2.1,
+      "position": [1100, -100]
+    }
+  ],
+  "connections": {
+    "Schedule Trigger": {
+      "main": [
+        [
+          {
+            "node": "Check Server",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Check Server": {
+      "main": [
+        [
+          {
+            "node": "Is Down?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Is Down?": {
+      "main": [
+        [
+          {
+            "node": "Get Crash Logs",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Get Crash Logs": {
+      "main": [
+        [
+          {
+            "node": "AI Root Cause Analysis",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "AI Root Cause Analysis": {
+      "main": [
+        [
+          {
+            "node": "Send Alert",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1"
+  }
+}
